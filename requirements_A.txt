@@ -1,0 +1,6 @@
+datasets
+evaluate
+rouge_score
+nltk
+streamlit
+requests
