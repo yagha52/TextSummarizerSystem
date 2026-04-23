@@ -1,0 +1,122 @@
+# 🧠 Machine Learning Notes (Summarization Project)
+
+---
+
+## 📌 Baseline
+
+* A simple starting method to compare against
+* Example: take first 3 sentences of an article
+* Used to check if your model is actually better
+
+---
+
+## 📊 ROUGE
+
+* Metric to evaluate summaries
+* Compares model summary vs reference summary
+* Measures overlap of words/phrases
+* Types:
+
+  * ROUGE-1 → words
+  * ROUGE-2 → word pairs
+  * ROUGE-L → sentence structure similarity
+
+---
+
+## 🤗 Hugging Face
+
+* Platform for ML models and tools
+* Provides:
+
+  * pre-trained models
+  * datasets
+  * evaluation tools (ROUGE, etc.)
+* Makes NLP easy to use
+
+---
+
+## 🧠 Fine-tuning
+
+* Taking a pre-trained model and training it on your task
+* Goal: improve performance on specific data
+* Uses examples (input → output pairs)
+* Faster than training from scratch
+
+---
+
+## ⚙️ Training setup terms
+
+### MODEL_NAME
+
+* Base model you start from (e.g. Mistral)
+
+### MAX_SEQ_LEN
+
+* Maximum text the model can read at once
+
+### BATCH_SIZE
+
+* Number of training examples processed together
+
+### GRAD_ACCUM
+
+* Accumulates gradients over multiple batches before updating
+
+### LEARNING_RATE
+
+* How much the model changes each step
+
+### EPOCHS
+
+* Number of times the model sees full dataset
+
+---
+
+## 🧠 Online vs Batch learning
+
+* Online → update after every example ❌
+* Batch / mini-batch → update after groups of examples ✅
+* Your setup = mini-batch + gradient accumulation
+
+---
+
+## 🧩 LoRA (Low-Rank Adaptation)
+
+* Efficient fine-tuning method
+* Freezes base model
+* Trains small adapter layers only
+* Saves memory and compute
+
+---
+
+## ⚙️ LoRA Rank (LORA_RANK)
+
+* Controls the **capacity of the adapter**, not number of adapters
+* Example: LORA_RANK = 16 → moderate learning capacity
+* NOT “16 adapters”
+
+### Intuition:
+
+* Rank = number of “learning dimensions” inside adapters
+* Small rank → fast but limited learning
+* Large rank → more powerful but heavier
+* 16 = balanced choice
+
+---
+
+## ⚙️ What happens in LoRA training
+
+1. Base model is frozen ❄️
+2. Small adapter layers are added 🔧
+3. Only adapters are trained 🔥
+4. Model learns task-specific behavior
+
+---
+
+## 🔥 Final mental model
+
+* Baseline → simple starting point
+* Fine-tuning → teach model task
+* LoRA → efficient way to fine-tune
+* ROUGE → measure performance
+* Hugging Face → tools + models ecosystem

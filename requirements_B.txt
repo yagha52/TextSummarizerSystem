@@ -1,0 +1,11 @@
+torch
+transformers
+datasets
+trl
+peft
+accelerate
+bitsandbytes
+requests
+jupyter
+evaluate
+rouge_score
