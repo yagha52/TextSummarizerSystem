@@ -56,19 +56,21 @@ text-summarization/
 │
 ├── model/
 │   ├── config.py             ← Model hyperparameters
-│   ├── fine_tune.py          ← Fine-tuning script
-│   ├── Modelfile             ← Ollama model definition
-│   └── checkpoints/          ← Saved model weights
+│   ├── fine_tune.py          ← Fine-tuning script (Transformers + PEFT)
+│   └── checkpoints/
+│       └── final/            ← Final fine-tuned weights (adapters)
 │
 ├── evaluation/
-│   ├── evaluate.py           ← ROUGE scoring script
-│   ├── baseline.py           ← Lead-3 baseline script
-│   └── results/              ← Saved score files
+│   ├── rouge_utils.py        ← ROUGE scoring logic
+│   ├── baseline.py           ← Lead-3 baseline logic
+│   └── results/              ← Saved ROUGE scores & comparisons
 │
 ├── app/
 │   └── app.py                ← Streamlit web interface
 │
-└── predict.py                ← Inference: article → summary
+├── predict.py                ← Direct inference (Loads model via Transformers)
+├── run_evaluation.py         ← Main evaluation runner
+└── TECHNICAL_SUMMARY.md      ← Detailed project technical report
 ```
 
 ---
@@ -123,8 +125,7 @@ The technique used is called **LoRA** (Low-Rank Adaptation) — it only trains
 a small fraction of the model's weights, making the process fast and
 memory-efficient even on a laptop GPU.
 
-After training, Person B exports the model and deploys it **locally** using
-**Ollama** — a tool that runs LLMs as a local REST API.
+After training, Person B exports the model weights to `model/checkpoints/final`. The project uses the **Transformers** library for inference, allowing for direct integration into Python scripts without needing external model servers.
 
 ### Phase 3 — Evaluation (Person A + Person B)
 Person A writes an evaluation script using **ROUGE scores** — a standard
@@ -136,9 +137,7 @@ of the article as the "summary") to set a minimum score. Person B's fine-tuned
 model must beat this baseline to prove the AI is actually useful.
 
 ### Phase 4 — Inference & Web App (Person A)
-Person A writes `predict.py` — a script that sends any article to Person B's
-Ollama model and gets back the summary. Then they build a **Streamlit web app**
-where any user can paste an article and click "Summarize".
+Person A writes `predict.py` — a script that loads the fine-tuned model and generates summaries. Then they build a **Streamlit web app** where any user can paste an article and click "Summarize".
 
 ---
 
@@ -153,24 +152,24 @@ Step 1: Downloads & cleans data
 Step 2: Formats data as JSONL
                           ── delivers JSONL files ──►
                                                     Step 3: Fine-tunes model
-                                                    Step 4: Exports to Ollama
-                          ◄── delivers Ollama model ──
-Step 5: Builds evaluate.py
-                          ── delivers evaluate.py ──►
-                                                    Step 6: Runs final scores
+                                                    Step 4: Saves weights to `checkpoints/final`
+                          ── model is ready to load ──►
+Step 5: Builds rouge_utils.py
+                          ── delivers rouge_utils.py ──►
+                                                     Step 6: Runs final scores
 Step 7: Builds web app
-        (connects to Ollama)
+        (connects to predict.py)
 ────────────────────────────────────────────────────────────
              FINAL RESULT: Working web app + ROUGE scores
 ```
 
 ### The 2 Sync Points
 1. **Person A → Person B:** Share the `data/processed/` JSONL files. Person B cannot start real training without these.
-2. **Person B → Person A:** Share the Ollama model name (`summarizer`). Person A needs this to finish the web app.
+2. **Person B → Person A:** Share the final model directory path (`model/checkpoints/final`). Person A needs this for `predict.py` to work.
 
 > 💡 **Tip for independent work:** Person A can build the entire web app using
 > a **mock summarizer** (a dummy function that returns a fake summary). When
-> Person B delivers the real Ollama model, Person A just swaps **one line** of
+> Person B delivers the real model weights, Person A just swaps **one line** of
 > code to connect to the real model. No waiting required.
 
 ---
@@ -181,9 +180,9 @@ Step 7: Builds web app
 |------|--------------|
 | **Python** | Main programming language |
 | **Hugging Face `datasets`** | Easily download the CNN/DailyMail dataset |
-| **Unsloth** | Fast and memory-efficient LLM fine-tuning |
+| **BitsAndBytes** | 4-bit quantization to save GPU memory |
 | **LoRA / PEFT** | Fine-tune only part of the model (saves memory) |
-| **Ollama** | Run the fine-tuned LLM as a local API |
+| **PyTorch / Transformers** | Core libraries for model loading and inference |
 | **Hugging Face `evaluate`** | Calculate ROUGE scores |
 | **Streamlit** | Build the web interface in pure Python |
 | **NLTK** | Text tokenization for baseline evaluation |
@@ -202,14 +201,31 @@ Step 7: Builds web app
 
 Once both people have completed their work:
 
-**Step 1 — Start the model server (Person B's machine or shared)**
+**Step 1 — Create and activate a virtual environment**
 ```bash
-ollama serve
+# Create venv
+python -m venv .venv
+
+# Activate (Windows)
+.\.venv\Scripts\activate
+
+# Activate (Mac/Linux)
+source .venv/bin/activate
 ```
 
-**Step 2 — Run the web app (Person A's work)**
+**Step 2 — Install dependencies**
+```bash
+pip install -r requirements_B.txt
+```
+
+**Step 2 — Run the web app**
 ```bash
 streamlit run app/app.py
+```
+
+**Step 3 — Run Evaluation (Optional)**
+```bash
+python run_evaluation.py --quick
 ```
 
 **Step 3 — Open your browser**
@@ -227,7 +243,7 @@ Paste any news article → click **Summarize** → get your AI-generated summary
 |------|----------|----------|
 | **Week 1** | Download dataset, clean & format data | Set up environment, choose model |
 | **Week 2** | Write ROUGE evaluation script, baseline | Receive JSONL data, start fine-tuning |
-| **Week 3** | Build web app with mock summarizer | Finish fine-tuning, export to Ollama |
+| **Week 3** | Build web app with mock summarizer | Finish fine-tuning, save model weights |
 | **Week 4** | Connect web app to real model, final testing | Run final evaluation with ROUGE scores |
 
 ---
@@ -239,7 +255,7 @@ Paste any news article → click **Summarize** → get your AI-generated summary
 | **Fine-tuning** | Taking an existing AI model and training it more on your specific task |
 | **LLM** | Large Language Model — an AI that understands and generates text (e.g., Mistral, LLaMA) |
 | **LoRA** | A technique to fine-tune only a small part of the model, saving time and memory |
-| **Ollama** | A tool that runs LLMs locally on your computer as a simple API |
+| **Transformers** | The library used to load and run the Llama model directly in Python |
 | **ROUGE** | A metric that measures how similar a generated summary is to a human-written one |
 | **JSONL** | A file format where each line is a separate JSON object — used for training data |
 | **Streamlit** | A Python library for building web apps in minutes without HTML/CSS |

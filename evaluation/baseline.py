@@ -1,7 +1,7 @@
 import os
 import json
 import nltk
-from evaluate import compute_rouge
+from rouge_utils import compute_rouge
 
 # Download punkt tokenizer data if not downloaded yet
 try:

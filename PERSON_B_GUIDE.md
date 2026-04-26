@@ -9,15 +9,15 @@
 
 ## 🗂️ Your Task Overview
 
-| # | Task | Phase | Deliverable |
-|---|------|-------|-------------|
-| 1 | Model Research & Selection | Phase 2 | Documented model choice |
-| 2 | Environment Setup (Ollama + Unsloth) | Phase 2 | Working local LLM environment |
-| 3 | Load & Verify Dataset | Phase 2 | Confirmed data format |
-| 4 | Fine-Tuning the Model | Phase 3 | Fine-tuned model weights |
-| 5 | Hyperparameter Tuning | Phase 3 | Optimized model config |
-| 6 | Export Model for Ollama | Phase 3 | `Modelfile` + deployed model |
-| 7 | Final Evaluation | Phase 4 | ROUGE scores vs. baseline |
+| # | Task | Phase | Deliverable | Status |
+|---|------|-------|-------------|--------|
+| 1 | Model Research & Selection | Phase 2 | Documented model choice | [x] |
+| 2 | Environment Setup (Transformers + PEFT) | Phase 2 | Working local LLM environment | [x] |
+| 3 | Load & Verify Dataset | Phase 2 | Confirmed data format | [x] |
+| 4 | Fine-Tuning the Model (LoRA) | Phase 3 | Fine-tuned model weights | [x] |
+| 5 | Hyperparameter Tuning | Phase 3 | Optimized model config | [x] |
+| 6 | Model Export & Save | Phase 3 | Saved weights in `checkpoints/final` | [x] |
+| 7 | Final Evaluation | Phase 4 | ROUGE scores vs. baseline | [x] |
 
 ---
 
@@ -51,9 +51,9 @@ Choose the best LLM for text summarization that can run locally with minimal har
 | **Phi-3 Mini** | 3.8B params | Very efficient, low resource usage | 4GB+ VRAM |
 | **Gemma 2B** | 2B params | Smallest option, CPU-friendly | No GPU needed |
 
-### Recommendation
-> ✅ Use **Mistral-7B** if you have a decent GPU (8GB+ VRAM).
-> ✅ Use **LLaMA 3.2 3B** or **Phi-3 Mini** if on a laptop or limited hardware.
+### Implementation Choice
+> ✅ **Selected Model:** `unsloth/Llama-3.2-3B-bnb-4bit`
+> ✅ **Reason:** Fits within 4GB VRAM constraint while maintaining decent quality.
 
 ### Steps
 1. Check your GPU memory:
@@ -78,7 +78,7 @@ Choose the best LLM for text summarization that can run locally with minimal har
 
 ---
 
-## ✅ Task 2 — Environment Setup (Ollama + Unsloth)
+## ✅ Task 2 — Environment Setup (Transformers + PEFT)
 
 ### Goal
 Set up your local development environment with all the tools needed for loading and fine-tuning LLMs.
@@ -102,9 +102,7 @@ Set up your local development environment with all the tools needed for loading 
 
 #### 2b — Install Python Fine-Tuning Libraries
 ```bash
-pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-pip install --no-deps trl peft accelerate bitsandbytes
-pip install torch transformers datasets
+pip install torch transformers datasets peft bitsandbytes accelerate
 ```
 
 > 💡 **Tip:** If you don't have a GPU, you can use **Google Colab** (free GPU) to run
@@ -189,30 +187,38 @@ Create `model/fine_tune.py`:
 
 ```python
 # fine_tune.py
-from unsloth import FastLanguageModel
-from trl import SFTTrainer
-from transformers import TrainingArguments
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, TaskType
 from datasets import load_dataset
 import config
 
-# ── 1. Load the base model ──────────────────────────────────────────────────
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name   = config.MODEL_NAME,
-    max_seq_length = config.MAX_SEQ_LEN,
-    load_in_4bit = True,  # Use 4-bit quantization to save memory
+# ── 1. Load the base model (4-bit) ──────────────────────────────────────────
+quant_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16,
+    bnb_4bit_quant_type="nf4",
 )
 
-# ── 2. Apply LoRA adapters ──────────────────────────────────────────────────
-model = FastLanguageModel.get_peft_model(
-    model,
-    r              = config.LORA_RANK,
-    target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
-                      "gate_proj", "up_proj", "down_proj"],
-    lora_alpha     = 16,
-    lora_dropout   = 0,
-    bias           = "none",
-    use_gradient_checkpointing = True,
+model = AutoModelForCausalLM.from_pretrained(
+    config.MODEL_NAME,
+    quantization_config=quant_config,
+    device_map="auto",
 )
+tokenizer = AutoTokenizer.from_pretrained(config.MODEL_NAME)
+tokenizer.pad_token = tokenizer.eos_token
+
+# ── 2. Apply LoRA adapters ──────────────────────────────────────────────────
+lora_config = LoraConfig(
+    r=config.LORA_RANK,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+    lora_alpha=16,
+    lora_dropout=0.05,
+    bias="none",
+    task_type=TaskType.CAUSAL_LM
+)
+model = get_peft_model(model, lora_config)
 
 # ── 3. Load dataset ─────────────────────────────────────────────────────────
 dataset = load_dataset("json", data_files={
@@ -221,17 +227,13 @@ dataset = load_dataset("json", data_files={
 })
 
 # ── 4. Training configuration ───────────────────────────────────────────────
-trainer = SFTTrainer(
-    model        = model,
-    tokenizer    = tokenizer,
-    train_dataset = dataset["train"],
-    eval_dataset  = dataset["validation"],
-    dataset_text_field = "text",
-    max_seq_length = config.MAX_SEQ_LEN,
-    args = TrainingArguments(
+trainer = Trainer(
+    model=model,
+    train_dataset=dataset["train"],
+    eval_dataset=dataset["validation"],
+    args=TrainingArguments(
         per_device_train_batch_size   = config.BATCH_SIZE,
         gradient_accumulation_steps   = config.GRAD_ACCUM,
-        warmup_steps                  = 50,
         num_train_epochs              = config.EPOCHS,
         learning_rate                 = config.LEARNING_RATE,
         fp16                          = True,
@@ -239,7 +241,6 @@ trainer = SFTTrainer(
         evaluation_strategy           = "epoch",
         save_strategy                 = "epoch",
         output_dir                    = "model/checkpoints",
-        load_best_model_at_end        = True,
         report_to                     = "none",
     ),
 )
@@ -302,119 +303,60 @@ Experiment with different settings to get the best possible summary quality.
 
 ---
 
-## ✅ Task 6 — Export Model for Ollama
-
+## ✅ Task 6 — Model Export & Saving
 ### Goal
-Convert your fine-tuned model to GGUF format and deploy it with Ollama so Person A can use it in their `predict.py` script.
+Save the fine-tuned LoRA adapters and tokenizer in a format that can be loaded for inference without needing the full original weights separately every time.
+
+### Implementation Choice
+Instead of using Ollama (which requires GGUF conversion), we opted to use **Transformers' `save_pretrained`** method. This allows for direct loading in `predict.py` using `AutoModelForCausalLM`.
 
 ### Steps
-
-#### 6a — Convert to GGUF format
-```python
-# In fine_tune.py, append this after saving:
-model.save_pretrained_gguf(
-    "model/gguf_model",
-    tokenizer,
-    quantization_method = "q4_k_m"  # Good balance of size vs quality
-)
-print("✅ GGUF model saved!")
-```
-
-#### 6b — Create an Ollama Modelfile
-Create `model/Modelfile`:
-```
-FROM ./gguf_model/model-q4_k_m.gguf
-
-SYSTEM """
-You are a helpful AI assistant specialized in summarizing news articles.
-Always respond with a concise, accurate summary in 2-3 sentences.
-"""
-
-PARAMETER temperature 0.3
-PARAMETER top_p 0.9
-PARAMETER num_predict 200
-```
-
-#### 6c — Register the model with Ollama
-```bash
-ollama create summarizer -f model/Modelfile
-```
-
-#### 6d — Test it works
-```bash
-ollama run summarizer "### Instruction:\nSummarize this article.\n\n### Article:\nOpenAI released GPT-4 today, marking a major milestone in AI development...\n\n### Summary:"
-```
+1. In `fine_tune.py`, after training:
+   ```python
+   model.save_pretrained("model/checkpoints/final")
+   tokenizer.save_pretrained("model/checkpoints/final")
+   ```
+2. In `predict.py`, the model is loaded using:
+   ```python
+   model = AutoModelForCausalLM.from_pretrained(
+       "model/checkpoints/final",
+       dtype=torch.float16,
+       device_map="auto"
+   )
+   ```
 
 ### Deliverable
-- Model registered with Ollama under the name `summarizer`.
-- Person A can now use `predict.py` to call it.
-
-> ✅ **SYNC POINT:** Notify Person A that the model is deployed and ready. They just need to run `ollama serve` and their `predict.py` will work.
+- `model/checkpoints/final/` contains the `adapter_config.json`, `adapter_model.safetensors`, and tokenizer files.
 
 ---
 
 ## ✅ Task 7 — Final Evaluation
-
-> ⚠️ **Dependency:** You need `evaluation/evaluate.py` from **Person A** to run this task.
-
 ### Goal
 Measure how good your fine-tuned model is using ROUGE scores and compare it against the baseline.
 
+### Implementation Choice
+We used a dedicated script `run_evaluation.py` that handles both the model predictions and the Lead-3 baseline calculation in one go.
+
 ### Steps
-
-1. Generate summaries for the entire test set:
-   ```python
-   # run_evaluation.py
-   import json
-   import requests
-
-   OLLAMA_URL  = "http://localhost:11434/api/generate"
-   MODEL_NAME  = "summarizer"
-
-   def generate_summary(article):
-       prompt = f"### Instruction:\nSummarize the following news article in 2-3 sentences.\n\n### Article:\n{article}\n\n### Summary:\n"
-       resp = requests.post(OLLAMA_URL, json={
-           "model": MODEL_NAME, "prompt": prompt, "stream": False
-       })
-       return resp.json()["response"].strip()
-
-   predictions, references = [], []
-
-   with open("data/processed/test.jsonl") as f:
-       for line in f:
-           sample = json.loads(line)
-           # Extract article and reference summary from the text field
-           parts   = sample["text"].split("### Summary:\n")
-           article = parts[0].split("### Article:\n")[1].strip()
-           ref     = parts[1].strip()
-           pred    = generate_summary(article)
-           predictions.append(pred)
-           references.append(ref)
-
-   # Use Person A's evaluation script
-   import sys
-   sys.path.append("evaluation")
-   from evaluate import compute_rouge
-
-   scores = compute_rouge(predictions, references)
-   print("📊 Final ROUGE Scores:", scores)
+1. Run the evaluation script:
+   ```bash
+   python run_evaluation.py --quick
    ```
-
-2. Compare your scores against Person A's baseline scores from `evaluation/results/baseline_scores.json`.
-
-3. Write a short summary report.
-
-### What Good Looks Like
-
-| Metric | Baseline (Lead-3) | Target (Fine-tuned) |
-|--------|-------------------|---------------------|
-| ROUGE-1 | ~0.30 | > 0.38 |
-| ROUGE-2 | ~0.11 | > 0.15 |
-| ROUGE-L | ~0.20 | > 0.25 |
+2. The script calculates:
+   - **Model Scores**: ROUGE metrics for the fine-tuned AI.
+   - **Baseline Scores**: ROUGE metrics for the first 3 sentences of the article.
+   - **Comparison**: A side-by-side table showing the difference.
 
 ### Deliverable
-- `evaluation/results/final_rouge_scores.json`
-- Confirmation that fine-tuned model beats the baseline.
+- `evaluation/results/quick_comparison.json` (for small tests) or `final_comparison.json`.
+- Side-by-side comparison table in the console.
+
+### What Good Looks Like
+| Metric | Baseline (Lead-3) | Target (Fine-tuned) |
+|--------|-------------------|---------------------|
+| ROUGE-1 | ~0.29 | Match or Exceed |
+| ROUGE-2 | ~0.12 | Match or Exceed |
+| ROUGE-L | ~0.21 | Match or Exceed |
 
 ---
 
