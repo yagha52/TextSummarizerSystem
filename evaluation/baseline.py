@@ -1,7 +1,11 @@
 import os
 import json
 import nltk
+<<<<<<< HEAD
 from evaluate import compute_rouge
+=======
+from rouge_utils import compute_rouge
+>>>>>>> gaelle
 
 # Download punkt tokenizer data if not downloaded yet
 try:
