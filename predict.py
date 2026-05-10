@@ -1,35 +1,59 @@
-import requests
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "summarizer"  # Person B's fine-tuned model name
+# -------------------------
+# 1. Load trained model ONCE
+# -------------------------
+MODEL_PATH = "Gaellebitar/Text-Summarizer-Model"
 
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    dtype=torch.float16,
+    device_map="auto"
+)
+
+model.eval()
+
+# -------------------------
+# 2. Summarize function
+# -------------------------
 def summarize(article: str) -> str:
-    """Takes an article text and returns the summary via Ollama API."""
+    # ✅ SIMPLE prompt (very important)
     prompt = (
-        "### Instruction:\nSummarize the following news article in 2-3 sentences.\n\n"
-        f"### Article:\n{article}\n\n### Summary:\n"
+        f"Summarize the following news article in exactly 3 sentences:\n"
+        f"1) main idea\n"
+        f"2) key details\n"
+        f"3) impact or risks\n\n"
+        f"{article}\n\nSummary:"
     )
-    
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": False
-    }
-    
-    try:
-        response = requests.post(OLLAMA_URL, json=payload)
-        response.raise_for_status()
-        return response.json().get("response", "").strip()
-    except requests.exceptions.RequestException as e:
-        return f"Error connecting to Ollama: {e}"
 
-if __name__ == "__main__":
-    print("--- Text Summarizer Inference ---")
-    test_article = input("Paste your article here (press Enter when done, note multi-line might need tweaking depending on terminal):\n")
-    if test_article.strip():
-        print("\n⏳ Generating Summary...")
-        summary = summarize(test_article)
-        print("\n--- Generated Summary ---")
-        print(summary)
-    else:
-        print("Empty article provided.")
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=120,
+            temperature=0.4,          # less rigid → better text
+            top_p=0.9,
+            repetition_penalty=1.1,
+            do_sample=True,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.eos_token_id,  # silences max_length conflict warning
+        )
+
+    # ✅ decode ONLY the generated part (VERY IMPORTANT)
+    generated_tokens = outputs[0][inputs["input_ids"].shape[-1]:]
+    result = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+
+    # ✅ clean accidental leftovers
+    result = result.replace("Summary:", "").strip()
+
+    # ✅ force max 3 sentences
+    sentences = [s.strip() for s in result.split(".") if s.strip()]
+    result = ". ".join(sentences[:3])
+
+    if not result.endswith("."):
+        result += "."
+
+    return result

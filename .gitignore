@@ -1,4 +1,5 @@
 .venv/
 venv/
 __pycache__/
-model/checkpoints
+model/checkpoints/
+unsloth_compiled_cache/
