@@ -4,7 +4,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # -------------------------
 # 1. Load trained model ONCE
 # -------------------------
-MODEL_PATH = "model/checkpoints/final"
+MODEL_PATH = "Gaellebitar/Text-Summarizer-Model"
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 model = AutoModelForCausalLM.from_pretrained(
