@@ -3,3 +3,4 @@ venv/
 __pycache__/
 model/checkpoints/
 unsloth_compiled_cache/
+notebooks/
